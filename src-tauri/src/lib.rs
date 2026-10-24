@@ -3,7 +3,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{ShortcutState};
+use tauri_plugin_global_shortcut::ShortcutState;
 
 #[derive(Clone, Copy)]
 enum DockSide {
@@ -12,7 +12,13 @@ enum DockSide {
 }
 
 fn dock_window(window: &WebviewWindow, side: DockSide) {
-    if let Ok(Some(monitor)) = window.current_monitor() {
+    let monitor_opt = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    if let Some(monitor) = monitor_opt {
         let monitor_pos = monitor.position();
         let monitor_size = monitor.size();
         let scale_factor = monitor.scale_factor();
@@ -29,19 +35,61 @@ fn dock_window(window: &WebviewWindow, side: DockSide) {
         let _ = window.set_size(PhysicalSize::new(sidebar_width, sidebar_height));
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
+
+    #[cfg(target_os = "macos")]
+    setup_macos_auxiliary_window(window);
+}
+
+#[cfg(target_os = "macos")]
+fn setup_macos_auxiliary_window(window: &WebviewWindow) {
+    use objc2::class;
+    use objc2::ffi::object_setClass;
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    if let Ok(ptr) = window.ns_window() {
+        unsafe {
+            let ns_window = ptr as *mut AnyObject;
+
+            // 1. Convert NSWindow to NSPanel dynamically
+            let panel_class = class!(NSPanel);
+            let _ = object_setClass(ptr.cast(), (panel_class as *const objc2::runtime::AnyClass).cast());
+
+            // 2. Add NonActivatingPanel style mask (1 << 7 = 128) so activating it does NOT switch Spaces
+            let current_mask: usize = msg_send![ns_window, styleMask];
+            let _: () = msg_send![ns_window, setStyleMask: current_mask | 128];
+
+            // 3. Set NSPanel properties
+            let _: () = msg_send![ns_window, setFloatingPanel: true];
+            let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: true];
+
+            // 4. Set collection behaviors:
+            // CanJoinAllSpaces (1 << 0 = 1) | FullScreenAuxiliary (1 << 8 = 256) = 257
+            // This makes the window exist in ALL spaces at once without switching desktop spaces
+            let behavior: usize = 257;
+            let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+
+            // 5. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
+            let level: isize = 25;
+            let _: () = msg_send![ns_window, setLevel: level];
+
+            // 6. Force order to front on active space without triggering an OS space switch
+            let _: () = msg_send![ns_window, orderFrontRegardless];
+        }
+    }
 }
 
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
-        let is_focused = window.is_focused().unwrap_or(false);
 
-        if is_visible && is_focused {
+        if is_visible {
             let _ = window.hide();
         } else {
             let _ = window.unminimize();
             let _ = window.show();
-            let _ = window.set_focus();
+            #[cfg(target_os = "macos")]
+            setup_macos_auxiliary_window(&window);
         }
     }
 }
@@ -51,10 +99,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
+
             // Configure Main Window positioning on startup
             if let Some(window) = app.get_webview_window("main") {
                 dock_window(&window, DockSide::Right);
                 let _ = window.set_always_on_top(true);
+                let _ = window.show();
+                let _ = window.set_focus();
 
                 // Hide instead of destroy when close button (red traffic light) is clicked
                 let win_clone = window.clone();
@@ -66,12 +121,12 @@ pub fn run() {
                 });
             }
 
-            // Setup Global Shortcut (Option + Space / Alt + Space)
+            // Setup Global Shortcuts (Option+Space and Cmd+Shift+A)
             #[cfg(desktop)]
             {
                 let _ = app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
-                        .with_shortcuts(["alt+space"])?
+                        .with_shortcuts(["alt+space", "super+shift+a"])?
                         .with_handler(|app, _shortcut, event| {
                             if event.state == ShortcutState::Pressed {
                                 toggle_window(app);
@@ -82,7 +137,7 @@ pub fn run() {
             }
 
             // Setup System Tray Menu (macOS Menu Bar)
-            let toggle_item = MenuItemBuilder::with_id("toggle", "Toggle Orbit (⌥ Space)").build(app)?;
+            let toggle_item = MenuItemBuilder::with_id("toggle", "Toggle Orbit (⌥ Space / ⌘⇧A)").build(app)?;
             let always_on_top_item = CheckMenuItemBuilder::with_id("always_on_top", "Always on Top")
                 .checked(true)
                 .build(app)?;
