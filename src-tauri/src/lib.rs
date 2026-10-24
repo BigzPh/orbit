@@ -18,6 +18,9 @@ static IS_WINDOW_OPEN: AtomicBool = AtomicBool::new(true);
 
 #[cfg(target_os = "macos")]
 unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
+    use objc2::class;
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
     use std::ffi::c_void;
 
     unsafe extern "C" {
@@ -41,12 +44,44 @@ unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
             unsafe extern "C" fn return_yes(_this: *mut c_void, _cmd: *mut c_void) -> bool {
                 true
             }
-            let types = b"c@:\0".as_ptr();
-            let sel_can_become_key = sel_registerName(b"canBecomeKeyWindow\0".as_ptr());
-            let sel_can_become_main = sel_registerName(b"canBecomeMainWindow\0".as_ptr());
-            let imp: unsafe extern "C" fn() = std::mem::transmute(return_yes as *const () as usize);
-            class_addMethod(new_class, sel_can_become_key, imp, types);
-            class_addMethod(new_class, sel_can_become_main, imp, types);
+            unsafe extern "C" fn return_yes_first_mouse(_this: *mut c_void, _cmd: *mut c_void, _event: *mut c_void) -> bool {
+                true
+            }
+            unsafe extern "C" fn orbit_send_event(this: *mut AnyObject, _cmd: *mut c_void, event: *mut AnyObject) {
+                let event_type: usize = msg_send![event, type];
+                // 1 = LeftMouseDown, 3 = RightMouseDown, 25 = OtherMouseDown
+                if event_type == 1 || event_type == 3 || event_type == 25 {
+                    let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+                    let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
+                    let _: () = msg_send![this, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+                }
+                let superclass = class!(NSPanel);
+                let _: () = msg_send![super(this, superclass), sendEvent: event];
+            }
+            unsafe extern "C" fn orbit_become_key_window(this: *mut AnyObject, _cmd: *mut c_void) {
+                let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+                let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
+                let superclass = class!(NSPanel);
+                let _: () = msg_send![super(this, superclass), becomeKeyWindow];
+            }
+
+            let types_bool = b"c@:\0".as_ptr();
+            let types_first_mouse = b"c@:@\0".as_ptr();
+            let types_send_event = b"v@:@\0".as_ptr();
+            let types_become_key = b"v@:\0".as_ptr();
+
+            let imp_bool: unsafe extern "C" fn() = std::mem::transmute(return_yes as *const () as usize);
+            let imp_first_mouse: unsafe extern "C" fn() = std::mem::transmute(return_yes_first_mouse as *const () as usize);
+            let imp_send_event: unsafe extern "C" fn() = std::mem::transmute(orbit_send_event as *const () as usize);
+            let imp_become_key: unsafe extern "C" fn() = std::mem::transmute(orbit_become_key_window as *const () as usize);
+
+            class_addMethod(new_class, sel_registerName(b"canBecomeKeyWindow\0".as_ptr()), imp_bool, types_bool);
+            class_addMethod(new_class, sel_registerName(b"canBecomeMainWindow\0".as_ptr()), imp_bool, types_bool);
+            class_addMethod(new_class, sel_registerName(b"needsPanelToBecomeKey\0".as_ptr()), imp_bool, types_bool);
+            class_addMethod(new_class, sel_registerName(b"acceptsFirstMouse:\0".as_ptr()), imp_first_mouse, types_first_mouse);
+            class_addMethod(new_class, sel_registerName(b"sendEvent:\0".as_ptr()), imp_send_event, types_send_event);
+            class_addMethod(new_class, sel_registerName(b"becomeKeyWindow\0".as_ptr()), imp_become_key, types_become_key);
+
             objc_registerClassPair(new_class);
             new_class
         } else {
