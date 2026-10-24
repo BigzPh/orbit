@@ -166,6 +166,7 @@ pub fn run() {
             let default_icon = app.default_window_icon().cloned().unwrap();
             let _tray = TrayIconBuilder::new()
                 .icon(default_icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
