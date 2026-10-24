@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orbit - Antigravity Mini Sidebar</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body>
+    <div class="drag-bar" data-tauri-drag-region>
+      <div class="drag-title">Orbit</div>
+      <div class="badge">Always on Top</div>
+    </div>
+
+    <main class="container">
+      <div class="logo-wrap">
+        <svg class="orbit-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="24" cy="24" r="20" stroke="url(#orbit_grad)" stroke-width="2" stroke-dasharray="4 3"/>
+          <circle cx="24" cy="24" r="8" fill="url(#core_grad)"/>
+          <circle cx="38" cy="18" r="4" fill="#60A5FA"/>
+          <defs>
+            <linearGradient id="orbit_grad" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#38BDF8"/>
+              <stop offset="1" stop-color="#818CF8"/>
+            </linearGradient>
+            <linearGradient id="core_grad" x1="16" y1="16" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#4F46E5"/>
+              <stop offset="1" stop-color="#06B6D4"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+
+      <h1>Orbit</h1>
+      <p class="tagline">Antigravity Mini Sidebar</p>
+
+      <div class="card status-card">
+        <div class="status-header">
+          <span class="status-dot"></span>
+          <span>Remote Control Ready</span>
+        </div>
+        <p class="desc">Connecting you to your Antigravity Agent workstation...</p>
+        <button id="connect-btn" class="primary-btn">
+          Open Antigravity Remote
+        </button>
+      </div>
+
+      <div class="card shortcuts-card">
+        <h3>Quick Controls</h3>
+        <ul class="shortcuts-list">
+          <li><kbd>⌥ Space</kbd> <span>Toggle Sidebar</span></li>
+          <li><kbd>⌘ R</kbd> <span>Reload Stream</span></li>
+          <li><span>Menu Bar Icon</span> <span>Pin & Dock Controls</span></li>
+        </ul>
+      </div>
+
+      <div class="custom-url-box">
+        <label for="url-input">Custom Host (e.g. Local CLI bridge)</label>
+        <div class="input-row">
+          <input id="url-input" placeholder="https://antigravity.google.com" value="https://antigravity.google.com" />
+          <button id="go-btn" class="secondary-btn">Go</button>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
