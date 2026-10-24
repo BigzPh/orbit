@@ -116,6 +116,7 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
 
             // 3. Set NSPanel floating & key properties
             let _: () = msg_send![ns_window, setFloatingPanel: true];
+            let _: () = msg_send![ns_window, setHidesOnDeactivate: false];
             let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: false];
 
             // 4. Set collection behaviors:
