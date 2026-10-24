@@ -18,8 +18,6 @@ static IS_WINDOW_OPEN: AtomicBool = AtomicBool::new(true);
 
 #[cfg(target_os = "macos")]
 fn setup_macos_auxiliary_window(window: &WebviewWindow) {
-    use objc2::class;
-    use objc2::ffi::object_setClass;
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -27,11 +25,7 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
         unsafe {
             let ns_window = ptr as *mut AnyObject;
 
-            // 1. Convert NSWindow to NSPanel dynamically
-            let panel_class = class!(NSPanel);
-            let _ = object_setClass(ptr.cast(), (panel_class as *const objc2::runtime::AnyClass).cast());
-
-            // 2. Completely remove and hide standard window traffic light buttons (close=0, miniaturize=1, zoom=2)
+            // 1. Completely remove and hide standard window traffic light buttons (close=0, miniaturize=1, zoom=2)
             for button_type in 0isize..=2isize {
                 let btn: *mut AnyObject = msg_send![ns_window, standardWindowButton: button_type];
                 if !btn.is_null() {
@@ -39,24 +33,16 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
                 }
             }
 
-            // 3. Add NonActivatingPanel style mask (1 << 7 = 128) so activating it does NOT switch Spaces
-            let current_mask: usize = msg_send![ns_window, styleMask];
-            let _: () = msg_send![ns_window, setStyleMask: current_mask | 128];
-
-            // 4. Set NSPanel properties
-            let _: () = msg_send![ns_window, setFloatingPanel: true];
-            let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: true];
-
-            // 5. Set collection behaviors:
+            // 2. Set collection behaviors:
             // CanJoinAllSpaces (1 << 0 = 1) | FullScreenAuxiliary (1 << 8 = 256) = 257
             let behavior: usize = 257;
             let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
 
-            // 6. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
+            // 3. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
             let level: isize = 25;
             let _: () = msg_send![ns_window, setLevel: level];
 
-            // 7. Force order to front on active space
+            // 4. Force order to front on active space
             let _: () = msg_send![ns_window, orderFrontRegardless];
         }
     }
@@ -116,6 +102,12 @@ fn slide_in(app: &AppHandle) {
                         // 3. Animate smoothly to open position (slide in!)
                         let animator: *mut AnyObject = msg_send![ns_window, animator];
                         let _: () = msg_send![animator, setFrame: open_rect, display: true];
+
+                        // 4. Activate app and make window key so keyboard events/typing work immediately
+                        let _: () = msg_send![ns_window, makeKeyWindow];
+                        let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+                        let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
+                        let _ = window.set_focus();
                     }
                 }
             }
