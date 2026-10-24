@@ -51,10 +51,9 @@ unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
                 let event_type: usize = msg_send![event, type];
                 // 1 = LeftMouseDown, 3 = RightMouseDown, 25 = OtherMouseDown
                 if event_type == 1 || event_type == 3 || event_type == 25 {
-                    let _: () = msg_send![this, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
-                    let content_view: *mut AnyObject = msg_send![this, contentView];
-                    if !content_view.is_null() {
-                        let _: () = msg_send![this, makeFirstResponder: content_view];
+                    let is_key: bool = msg_send![this, isKeyWindow];
+                    if !is_key {
+                        let _: () = msg_send![this, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
                     }
                 }
                 let superclass = class!(NSPanel);
@@ -92,6 +91,7 @@ unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
 
 #[cfg(target_os = "macos")]
 fn setup_macos_auxiliary_window(window: &WebviewWindow) {
+    use objc2::class;
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
@@ -123,10 +123,22 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
             let _: () = msg_send![ns_window, setHidesOnDeactivate: false];
             let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: false];
 
-            // 4. Set collection behaviors:
+            // 4. Set collection behaviors on ALL windows of the application:
             // CanJoinAllSpaces (1 << 0 = 1) | FullScreenAuxiliary (1 << 8 = 256) = 257
             let behavior: usize = 257;
             let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+
+            let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let app_windows: *mut AnyObject = msg_send![ns_app, windows];
+            if !app_windows.is_null() {
+                let count: usize = msg_send![app_windows, count];
+                for i in 0..count {
+                    let w: *mut AnyObject = msg_send![app_windows, objectAtIndex: i];
+                    if !w.is_null() {
+                        let _: () = msg_send![w, setCollectionBehavior: behavior];
+                    }
+                }
+            }
 
             // 5. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
             let level: isize = 25;
@@ -193,16 +205,49 @@ fn slide_in(app: &AppHandle) {
                         let animator: *mut AnyObject = msg_send![ns_window, animator];
                         let _: () = msg_send![animator, setFrame: open_rect, display: true];
 
-                        // 4. Make key window and set first responder without activating NSApp (so it stays on the active space/desktop!)
+                        // 4. Make key window so keyboard typing works immediately without global app space switching
                         let _: () = msg_send![ns_window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+
+                        // 5. Direct first responder to the WKWebView inside contentView
                         let content_view: *mut AnyObject = msg_send![ns_window, contentView];
                         if !content_view.is_null() {
-                            let _: () = msg_send![ns_window, makeFirstResponder: content_view];
+                            let subviews: *mut AnyObject = msg_send![content_view, subviews];
+                            if !subviews.is_null() {
+                                let count: usize = msg_send![subviews, count];
+                                let target_view = if count > 0 {
+                                    let first: *mut AnyObject = msg_send![subviews, objectAtIndex: 0usize];
+                                    first
+                                } else {
+                                    content_view
+                                };
+                                let _: () = msg_send![ns_window, makeFirstResponder: target_view];
+                            }
+                        }
+
+                        // 6. Ensure all app windows have CanJoinAllSpaces | FullScreenAuxiliary
+                        let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+                        let app_windows: *mut AnyObject = msg_send![ns_app, windows];
+                        if !app_windows.is_null() {
+                            let count: usize = msg_send![app_windows, count];
+                            for i in 0..count {
+                                let w: *mut AnyObject = msg_send![app_windows, objectAtIndex: i];
+                                if !w.is_null() {
+                                    let _: () = msg_send![w, setCollectionBehavior: 257usize];
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+
+        // Auto-focus prompt input inside the webview after slide-in animation
+        let _ = window.eval(
+            "setTimeout(() => {
+                const el = document.querySelector('textarea, [contenteditable=\"true\"], input[type=\"text\"]');
+                if (el) { el.focus(); }
+            }, 100);"
+        );
 
         IS_WINDOW_OPEN.store(true, Ordering::SeqCst);
     }
