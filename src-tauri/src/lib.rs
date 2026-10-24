@@ -51,16 +51,16 @@ unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
                 let event_type: usize = msg_send![event, type];
                 // 1 = LeftMouseDown, 3 = RightMouseDown, 25 = OtherMouseDown
                 if event_type == 1 || event_type == 3 || event_type == 25 {
-                    let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-                    let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
                     let _: () = msg_send![this, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+                    let content_view: *mut AnyObject = msg_send![this, contentView];
+                    if !content_view.is_null() {
+                        let _: () = msg_send![this, makeFirstResponder: content_view];
+                    }
                 }
                 let superclass = class!(NSPanel);
                 let _: () = msg_send![super(this, superclass), sendEvent: event];
             }
             unsafe extern "C" fn orbit_become_key_window(this: *mut AnyObject, _cmd: *mut c_void) {
-                let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-                let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
                 let superclass = class!(NSPanel);
                 let _: () = msg_send![super(this, superclass), becomeKeyWindow];
             }
@@ -114,7 +114,11 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
                 }
             }
 
-            // 3. Set NSPanel floating & key properties
+            // 3. Add NonActivatingPanel style mask (1 << 7 = 128) so activating it does NOT switch Spaces or pull to Desktop 1
+            let current_mask: usize = msg_send![ns_window, styleMask];
+            let _: () = msg_send![ns_window, setStyleMask: current_mask | 128];
+
+            // 4. Set NSPanel floating & key properties
             let _: () = msg_send![ns_window, setFloatingPanel: true];
             let _: () = msg_send![ns_window, setHidesOnDeactivate: false];
             let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: false];
@@ -189,11 +193,12 @@ fn slide_in(app: &AppHandle) {
                         let animator: *mut AnyObject = msg_send![ns_window, animator];
                         let _: () = msg_send![animator, setFrame: open_rect, display: true];
 
-                        // 4. Activate app and make window key so keyboard events/typing work immediately
-                        let _: () = msg_send![ns_window, makeKeyWindow];
-                        let ns_app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-                        let _: () = msg_send![ns_app, activateIgnoringOtherApps: true];
-                        let _ = window.set_focus();
+                        // 4. Make key window and set first responder without activating NSApp (so it stays on the active space/desktop!)
+                        let _: () = msg_send![ns_window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+                        let content_view: *mut AnyObject = msg_send![ns_window, contentView];
+                        if !content_view.is_null() {
+                            let _: () = msg_send![ns_window, makeFirstResponder: content_view];
+                        }
                     }
                 }
             }
