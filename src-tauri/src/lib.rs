@@ -17,6 +17,45 @@ static CURRENT_DOCK_SIDE: Mutex<DockSide> = Mutex::new(DockSide::Right);
 static IS_WINDOW_OPEN: AtomicBool = AtomicBool::new(true);
 
 #[cfg(target_os = "macos")]
+unsafe fn get_or_register_orbit_panel_class() -> *mut std::ffi::c_void {
+    use std::ffi::c_void;
+
+    unsafe extern "C" {
+        fn objc_getClass(name: *const u8) -> *mut c_void;
+        fn objc_allocateClassPair(superclass: *mut c_void, name: *const u8, extra_bytes: usize) -> *mut c_void;
+        fn objc_registerClassPair(cls: *mut c_void);
+        fn class_addMethod(cls: *mut c_void, name: *mut c_void, imp: unsafe extern "C" fn(), types: *const u8) -> bool;
+        fn sel_registerName(name: *const u8) -> *mut c_void;
+    }
+
+    unsafe {
+        let class_name = b"OrbitPanel\0".as_ptr();
+        let existing = objc_getClass(class_name);
+        if !existing.is_null() {
+            return existing;
+        }
+
+        let superclass = objc_getClass(b"NSPanel\0".as_ptr());
+        let new_class = objc_allocateClassPair(superclass, class_name, 0);
+        if !new_class.is_null() {
+            unsafe extern "C" fn return_yes(_this: *mut c_void, _cmd: *mut c_void) -> bool {
+                true
+            }
+            let types = b"c@:\0".as_ptr();
+            let sel_can_become_key = sel_registerName(b"canBecomeKeyWindow\0".as_ptr());
+            let sel_can_become_main = sel_registerName(b"canBecomeMainWindow\0".as_ptr());
+            let imp: unsafe extern "C" fn() = std::mem::transmute(return_yes as *const () as usize);
+            class_addMethod(new_class, sel_can_become_key, imp, types);
+            class_addMethod(new_class, sel_can_become_main, imp, types);
+            objc_registerClassPair(new_class);
+            new_class
+        } else {
+            superclass
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn setup_macos_auxiliary_window(window: &WebviewWindow) {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -25,7 +64,14 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
         unsafe {
             let ns_window = ptr as *mut AnyObject;
 
-            // 1. Completely remove and hide standard window traffic light buttons (close=0, miniaturize=1, zoom=2)
+            // 1. Convert to OrbitPanel (a specialized NSPanel subclass that enables key window & typing)
+            let orbit_panel_class = get_or_register_orbit_panel_class();
+            unsafe extern "C" {
+                fn object_setClass(obj: *mut std::ffi::c_void, cls: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+            }
+            let _ = object_setClass(ptr.cast(), orbit_panel_class);
+
+            // 2. Completely remove and hide standard window traffic light buttons (close=0, miniaturize=1, zoom=2)
             for button_type in 0isize..=2isize {
                 let btn: *mut AnyObject = msg_send![ns_window, standardWindowButton: button_type];
                 if !btn.is_null() {
@@ -33,16 +79,20 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
                 }
             }
 
-            // 2. Set collection behaviors:
+            // 3. Set NSPanel floating & key properties
+            let _: () = msg_send![ns_window, setFloatingPanel: true];
+            let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: false];
+
+            // 4. Set collection behaviors:
             // CanJoinAllSpaces (1 << 0 = 1) | FullScreenAuxiliary (1 << 8 = 256) = 257
             let behavior: usize = 257;
             let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
 
-            // 3. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
+            // 5. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
             let level: isize = 25;
             let _: () = msg_send![ns_window, setLevel: level];
 
-            // 4. Force order to front on active space
+            // 6. Force order to front on active space
             let _: () = msg_send![ns_window, orderFrontRegardless];
         }
     }
@@ -62,12 +112,12 @@ fn slide_in(app: &AppHandle) {
                     let ns_window = ptr as *mut AnyObject;
                     setup_macos_auxiliary_window(&window);
 
-                    let screen: *mut AnyObject = msg_send![ns_window, screen];
-                    let screen_to_use = if !screen.is_null() {
-                        screen
-                    } else {
-                        let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                    let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                    let screen_to_use = if !main_s.is_null() {
                         main_s
+                    } else {
+                        let screen: *mut AnyObject = msg_send![ns_window, screen];
+                        screen
                     };
 
                     if !screen_to_use.is_null() {
@@ -129,12 +179,12 @@ fn slide_out(app: &AppHandle) {
             if let Ok(ptr) = window.ns_window() {
                 unsafe {
                     let ns_window = ptr as *mut AnyObject;
-                    let screen: *mut AnyObject = msg_send![ns_window, screen];
-                    let screen_to_use = if !screen.is_null() {
-                        screen
-                    } else {
-                        let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                    let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                    let screen_to_use = if !main_s.is_null() {
                         main_s
+                    } else {
+                        let screen: *mut AnyObject = msg_send![ns_window, screen];
+                        screen
                     };
 
                     if !screen_to_use.is_null() {
