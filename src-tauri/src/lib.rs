@@ -232,7 +232,9 @@ pub fn run() {
             let dock_right_item = MenuItemBuilder::with_id("dock_right", "Dock to Right Edge").build(app)?;
             let dock_left_item = MenuItemBuilder::with_id("dock_left", "Dock to Left Edge").build(app)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
-            let reload_item = MenuItemBuilder::with_id("reload", "Reload Antigravity (⌘ R)").build(app)?;
+            let reset_home_item = MenuItemBuilder::with_id("reset_home", "Restart to Antigravity Home").build(app)?;
+            let reload_item = MenuItemBuilder::with_id("reload", "Reload Page (⌘ R)").build(app)?;
+            let relaunch_item = MenuItemBuilder::with_id("relaunch", "Relaunch Orbit").build(app)?;
             let open_browser_item = MenuItemBuilder::with_id("open_browser", "Open in Web Browser").build(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit Orbit").build(app)?;
@@ -244,7 +246,9 @@ pub fn run() {
                     &dock_right_item,
                     &dock_left_item,
                     &sep1,
+                    &reset_home_item,
                     &reload_item,
+                    &relaunch_item,
                     &open_browser_item,
                     &sep2,
                     &quit_item,
@@ -279,10 +283,19 @@ pub fn run() {
                             *CURRENT_DOCK_SIDE.lock().unwrap() = DockSide::Left;
                             slide_in(app);
                         }
+                        "reset_home" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.eval("window.location.href = 'https://antigravity.google.com';");
+                                slide_in(app);
+                            }
+                        }
                         "reload" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.eval("window.location.reload();");
                             }
+                        }
+                        "relaunch" => {
+                            app.restart();
                         }
                         "open_browser" => {
                             let _ = tauri_plugin_opener::open_url("https://antigravity.google.com", None::<&str>);
