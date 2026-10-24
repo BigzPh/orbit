@@ -55,7 +55,15 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
             let panel_class = class!(NSPanel);
             let _ = object_setClass(ptr.cast(), (panel_class as *const objc2::runtime::AnyClass).cast());
 
-            // 2. Add NonActivatingPanel style mask (1 << 7 = 128) so activating it does NOT switch Spaces
+            // 2. Completely remove and hide standard window traffic light buttons (close=0, miniaturize=1, zoom=2)
+            for button_type in 0isize..=2isize {
+                let btn: *mut AnyObject = msg_send![ns_window, standardWindowButton: button_type];
+                if !btn.is_null() {
+                    let _: () = msg_send![btn, setHidden: true];
+                }
+            }
+
+            // 3. Add NonActivatingPanel style mask (1 << 7 = 128) so activating it does NOT switch Spaces
             let current_mask: usize = msg_send![ns_window, styleMask];
             let _: () = msg_send![ns_window, setStyleMask: current_mask | 128];
 

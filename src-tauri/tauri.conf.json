@@ -21,8 +21,7 @@
         "resizable": true,
         "alwaysOnTop": true,
         "focus": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "decorations": false
       }
     ],
     "security": {
