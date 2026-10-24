@@ -1,44 +1,20 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent,
+    AppHandle, Manager, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_global_shortcut::ShortcutState;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DockSide {
     Right,
     Left,
 }
 
-fn dock_window(window: &WebviewWindow, side: DockSide) {
-    let monitor_opt = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-
-    if let Some(monitor) = monitor_opt {
-        let monitor_pos = monitor.position();
-        let monitor_size = monitor.size();
-        let scale_factor = monitor.scale_factor();
-
-        let sidebar_width = (420.0 * scale_factor).round() as u32;
-        let sidebar_height = monitor_size.height;
-
-        let x = match side {
-            DockSide::Right => monitor_pos.x + monitor_size.width as i32 - sidebar_width as i32,
-            DockSide::Left => monitor_pos.x,
-        };
-        let y = monitor_pos.y;
-
-        let _ = window.set_size(PhysicalSize::new(sidebar_width, sidebar_height));
-        let _ = window.set_position(PhysicalPosition::new(x, y));
-    }
-
-    #[cfg(target_os = "macos")]
-    setup_macos_auxiliary_window(window);
-}
+static CURRENT_DOCK_SIDE: Mutex<DockSide> = Mutex::new(DockSide::Right);
+static IS_WINDOW_OPEN: AtomicBool = AtomicBool::new(true);
 
 #[cfg(target_os = "macos")]
 fn setup_macos_auxiliary_window(window: &WebviewWindow) {
@@ -67,38 +43,142 @@ fn setup_macos_auxiliary_window(window: &WebviewWindow) {
             let current_mask: usize = msg_send![ns_window, styleMask];
             let _: () = msg_send![ns_window, setStyleMask: current_mask | 128];
 
-            // 3. Set NSPanel properties
+            // 4. Set NSPanel properties
             let _: () = msg_send![ns_window, setFloatingPanel: true];
             let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: true];
 
-            // 4. Set collection behaviors:
+            // 5. Set collection behaviors:
             // CanJoinAllSpaces (1 << 0 = 1) | FullScreenAuxiliary (1 << 8 = 256) = 257
-            // This makes the window exist in ALL spaces at once without switching desktop spaces
             let behavior: usize = 257;
             let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
 
-            // 5. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
+            // 6. Set window level to NSMainMenuWindowLevel + 1 (25) so it floats above full-screen windows
             let level: isize = 25;
             let _: () = msg_send![ns_window, setLevel: level];
 
-            // 6. Force order to front on active space without triggering an OS space switch
+            // 7. Force order to front on active space
             let _: () = msg_send![ns_window, orderFrontRegardless];
         }
     }
 }
 
-fn toggle_window(app: &AppHandle) {
+fn slide_in(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let is_visible = window.is_visible().unwrap_or(false);
+        #[cfg(target_os = "macos")]
+        {
+            use objc2::class;
+            use objc2::msg_send;
+            use objc2::runtime::AnyObject;
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-        if is_visible {
-            let _ = window.hide();
-        } else {
-            let _ = window.unminimize();
-            let _ = window.show();
-            #[cfg(target_os = "macos")]
-            setup_macos_auxiliary_window(&window);
+            if let Ok(ptr) = window.ns_window() {
+                unsafe {
+                    let ns_window = ptr as *mut AnyObject;
+                    setup_macos_auxiliary_window(&window);
+
+                    let screen: *mut AnyObject = msg_send![ns_window, screen];
+                    let screen_to_use = if !screen.is_null() {
+                        screen
+                    } else {
+                        let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                        main_s
+                    };
+
+                    if !screen_to_use.is_null() {
+                        let frame: NSRect = msg_send![screen_to_use, frame];
+                        let visible_frame: NSRect = msg_send![screen_to_use, visibleFrame];
+
+                        let side = *CURRENT_DOCK_SIDE.lock().unwrap();
+                        let sidebar_w: f64 = 420.0;
+                        let sidebar_h: f64 = visible_frame.size.height;
+                        let y: f64 = visible_frame.origin.y;
+
+                        let (x_closed, x_open) = match side {
+                            DockSide::Right => (
+                                frame.origin.x + frame.size.width,
+                                frame.origin.x + frame.size.width - sidebar_w,
+                            ),
+                            DockSide::Left => (
+                                frame.origin.x - sidebar_w,
+                                frame.origin.x,
+                            ),
+                        };
+
+                        let closed_rect = NSRect::new(NSPoint::new(x_closed, y), NSSize::new(sidebar_w, sidebar_h));
+                        let open_rect = NSRect::new(NSPoint::new(x_open, y), NSSize::new(sidebar_w, sidebar_h));
+
+                        // 1. Instantly place window in closed position off-screen
+                        let _: () = msg_send![ns_window, setFrame: closed_rect, display: false];
+
+                        // 2. Make visible and order front
+                        let _: () = msg_send![ns_window, orderFrontRegardless];
+
+                        // 3. Animate smoothly to open position (slide in!)
+                        let animator: *mut AnyObject = msg_send![ns_window, animator];
+                        let _: () = msg_send![animator, setFrame: open_rect, display: true];
+                    }
+                }
+            }
         }
+
+        IS_WINDOW_OPEN.store(true, Ordering::SeqCst);
+    }
+}
+
+fn slide_out(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2::class;
+            use objc2::msg_send;
+            use objc2::runtime::AnyObject;
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+            if let Ok(ptr) = window.ns_window() {
+                unsafe {
+                    let ns_window = ptr as *mut AnyObject;
+                    let screen: *mut AnyObject = msg_send![ns_window, screen];
+                    let screen_to_use = if !screen.is_null() {
+                        screen
+                    } else {
+                        let main_s: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+                        main_s
+                    };
+
+                    if !screen_to_use.is_null() {
+                        let frame: NSRect = msg_send![screen_to_use, frame];
+                        let visible_frame: NSRect = msg_send![screen_to_use, visibleFrame];
+
+                        let side = *CURRENT_DOCK_SIDE.lock().unwrap();
+                        let sidebar_w: f64 = 420.0;
+                        let sidebar_h: f64 = visible_frame.size.height;
+                        let y: f64 = visible_frame.origin.y;
+
+                        let x_closed = match side {
+                            DockSide::Right => frame.origin.x + frame.size.width,
+                            DockSide::Left => frame.origin.x - sidebar_w,
+                        };
+
+                        let closed_rect = NSRect::new(NSPoint::new(x_closed, y), NSSize::new(sidebar_w, sidebar_h));
+
+                        // Animate smoothly to closed position off-screen (slide out!)
+                        let animator: *mut AnyObject = msg_send![ns_window, animator];
+                        let _: () = msg_send![animator, setFrame: closed_rect, display: true];
+                    }
+                }
+            }
+        }
+
+        IS_WINDOW_OPEN.store(false, Ordering::SeqCst);
+    }
+}
+
+fn toggle_window(app: &AppHandle) {
+    let is_open = IS_WINDOW_OPEN.load(Ordering::SeqCst);
+    if is_open {
+        slide_out(app);
+    } else {
+        slide_in(app);
     }
 }
 
@@ -112,19 +192,19 @@ pub fn run() {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
 
-            // Configure Main Window positioning on startup
+            // Configure Main Window positioning on startup with slide-in
             if let Some(window) = app.get_webview_window("main") {
-                dock_window(&window, DockSide::Right);
-                let _ = window.set_always_on_top(true);
-                let _ = window.show();
-                let _ = window.set_focus();
+                #[cfg(target_os = "macos")]
+                setup_macos_auxiliary_window(&window);
 
-                // Hide instead of destroy when close button (red traffic light) is clicked
-                let win_clone = window.clone();
+                slide_in(app.handle());
+
+                // Intercept close requests and slide out instead
+                let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = win_clone.hide();
+                        slide_out(&app_handle);
                     }
                 });
             }
@@ -192,14 +272,12 @@ pub fn run() {
                             }
                         }
                         "dock_right" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                dock_window(&window, DockSide::Right);
-                            }
+                            *CURRENT_DOCK_SIDE.lock().unwrap() = DockSide::Right;
+                            slide_in(app);
                         }
                         "dock_left" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                dock_window(&window, DockSide::Left);
-                            }
+                            *CURRENT_DOCK_SIDE.lock().unwrap() = DockSide::Left;
+                            slide_in(app);
                         }
                         "reload" => {
                             if let Some(window) = app.get_webview_window("main") {
