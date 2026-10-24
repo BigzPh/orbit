@@ -7,16 +7,27 @@ Orbit is a native, ultra-lightweight ($<40\text{ MB}$ RAM) desktop companion app
 
 ## ✨ Features
 
-- **🎯 Right-Edge Auto Docking:** Automatically positions itself flush against the right edge of your screen with full vertical workspace height.
-- **⚡️ Global Hotkey Toggle:** Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> anywhere in macOS to summon or dismiss Orbit instantly.
-- **📌 Always-on-Top:** Floats above your full-screen code editors, terminal windows, and browsers without stealing focus.
+- **🎯 Auto Docking & Smooth Animation:** Slides smoothly onto the screen with native macOS CoreAnimation. Configurable to dock on the right or left edge.
+- **⚡️ Global Hotkey Summon:** Press <kbd>⌥ Option</kbd> + <kbd>Space</kbd> (or <kbd>⌘</kbd> + <kbd>⇧ Shift</kbd> + <kbd>A</kbd>) anywhere in macOS to summon or dismiss Orbit instantly.
+- **🌌 Multi-Space & Full-Screen Auxiliary:** Floats seamlessly across all virtual desktops and over native full-screen IDEs/browsers (`CanJoinAllSpaces | FullScreenAuxiliary`).
+- **✍️ Immediate Typing Focus:** Type prompts immediately without focus fighting or window switching.
 - **🪐 macOS Menu Bar Tray:**
   - One-click toggle from the top menu bar.
   - Dock to Right / Dock to Left edge toggles.
   - "Always on Top" toggle.
-  - Quick reload (<kbd>⌘ R</kbd>) and browser fallback.
-- **🔒 Native WebKit Performance:** Uses macOS WKWebView directly via Tauri v2, avoiding Electron's heavy memory overhead.
+  - "Restart to Antigravity Home" (resets back if you ever get lost).
+  - Quick reload (<kbd>⌘ R</kbd>), app relaunch, and browser fallback.
+- **🔒 Native WebKit Performance:** Uses macOS WKWebView directly via Tauri v2, avoiding Electron's heavy memory overhead (<40MB RAM).
 - **🔑 Full Google Auth & WebSockets:** Supports Google account sign-in, persistent session cookies, and live streaming agent updates.
+
+---
+
+## 📦 Installation
+
+Download the latest release for Apple Silicon macOS:
+- **[Download Orbit macOS (.dmg)](https://github.com/BigzPh/orbit/releases/latest)**
+
+Mount the `.dmg` and drag `Orbit.app` to your `/Applications` folder.
 
 ---
 
@@ -47,9 +58,9 @@ npm run dev
 ### 3. Build Production macOS App (`.app` / `.dmg`)
 
 ```bash
-npm run build
+npm run tauri build
 ```
-The compiled macOS `.app` bundle will be created under `src-tauri/target/release/bundle/macos/Orbit.app`.
+The compiled macOS `.dmg` and `.app` bundles will be created under `src-tauri/target/release/bundle/`.
 
 ---
 
@@ -57,11 +68,11 @@ The compiled macOS `.app` bundle will be created under `src-tauri/target/release
 
 | Shortcut / Action | Description |
 | :--- | :--- |
-| <kbd>⌥ Option</kbd> + <kbd>Space</kbd> | Global shortcut to show/hide the Orbit sidebar |
+| <kbd>⌥ Option</kbd> + <kbd>Space</kbd> | Global shortcut to summon / dismiss Orbit |
+| <kbd>⌘</kbd> + <kbd>⇧ Shift</kbd> + <kbd>A</kbd> | Alternative global summon hotkey |
 | <kbd>⌘</kbd> + <kbd>R</kbd> | Refresh the Antigravity Remote webview stream |
 | **Menu Bar Icon (Left Click)** | Toggle sidebar visibility |
-| **Menu Bar Icon (Right Click)** | Open settings menu (dock side, pin, quit) |
-| **Close Button (Red Dot)** | Minimizes to tray instead of quitting |
+| **Menu Bar Icon (Right Click)** | Access settings (Restart to Home, Dock Side, Always on Top, Quit) |
 
 ---
 
